@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>圓周行星運動模型</title>
+  <style>
+    :root { --bg:#0b1220; --fg:#e9eefb; --muted:#9fb0d6; --accent:#6ee7ff; --card:#11182a; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; color:var(--fg); background: radial-gradient(1200px 800px at 70% -10%, #1a2542, var(--bg)); }
+    header { padding:14px 18px; border-bottom:1px solid #1f2943; display:flex; align-items:center; gap:12px; backdrop-filter: blur(6px); position: sticky; top: 0; z-index: 10; background: rgba(11,18,32,0.6); }
+    header h1 { font-size: clamp(16px, 3vw, 22px); margin: 0; letter-spacing: .5px; }
+    header .badge { border:1px solid #2b375e; color: var(--muted); padding: 4px 8px; border-radius: 999px; font-size: 12px; }
+
+    main { display: grid; grid-template-columns: 340px 1fr; min-height: calc(100vh - 56px); }
+    @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+
+    .panel { background: linear-gradient(180deg, rgba(22,31,53,.7), rgba(15,22,39,.7)); border-right: 1px solid #1f2943; padding: 16px; gap: 16px; display:flex; flex-direction: column; }
+    .card { background: var(--card); border:1px solid #1f2943; border-radius: 16px; padding: 14px; box-shadow: 0 10px 24px rgba(0,0,0,.25); }
+    .card h2 { font-size: 14px; margin: 0 0 10px; letter-spacing: .4px; color: var(--muted); }
+
+    label { display:block; font-size: 12px; color: var(--muted); margin: 10px 0 6px; }
+    input[type="range"]{ width: 100%; }
+    input, select { background:#0e1526; color:var(--fg); border:1px solid #263257; border-radius:12px; padding:10px; width:100%; }
+    button { cursor: pointer; border: 1px solid #2b375e; background: #101832; color: var(--fg); border-radius: 14px; padding: 10px 12px; font-weight: 600; }
+    button:active { transform: translateY(1px); }
+    .btn-row { display:flex; gap:10px; flex-wrap: wrap; }
+
+    .planet-list { display:flex; flex-direction: column; gap: 10px; }
+    .planet-item { display:flex; align-items:center; justify-content: space-between; padding: 8px 10px; border:1px solid #263257; border-radius: 12px; background: #0f1730; }
+    .dot { width: 14px; height: 14px; border-radius: 50%; margin-right: 8px; display:inline-block; }
+    .muted { color: var(--muted); font-size: 12px; }
+
+    .stage { position: relative; }
+    canvas { display:block; width: 100%; height: 100%; background: radial-gradient(900px 600px at 50% 50%, rgba(30,45,85,.45), transparent 60%); }
+    .overlay { position:absolute; inset: 0; pointer-events:none; padding: 12px; display:flex; align-items:flex-start; justify-content:space-between; }
+    .overlay .hud { background: rgba(16,24,48,.5); backdrop-filter: blur(6px); border:1px solid #22305a; border-radius: 12px; padding: 8px 10px; font-size: 12px; color: var(--muted); }
+    .legend { display:flex; gap:10px; align-items:center; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>圓周行星運動模型</h1>
+    <span class="badge">GitHub Pages 可部署</span>
+  </header>
+  <main>
+    <aside class="panel">
+      <section class="card">
+        <h2>全域控制</h2>
+        <div class="btn-row">
+          <button id="playPause">⏵︎/⏸︎ 播放</button>
+          <button id="resetBtn">↺ 重置</button>
+          <button id="toggleTrails">✧ 尾跡</button>
+        </div>
+        <label for="speed">時間倍率（×）<span class="muted" id="speedVal">1.0</span></label>
+        <input type="range" id="speed" min="0.1" max="10" step="0.1" value="1">
+        <label for="scale">比例縮放（px/單位）<span class="muted" id="scaleVal">1.0</span></label>
+        <input type="range" id="scale" min="0.2" max="2.5" step="0.1" value="1">
+      </section>
+
+      <section class="card">
+        <h2>新增行星</h2>
+        <label>名稱</label>
+        <input id="pName" placeholder="例如：Earth">
+        <label>軌道半徑（單位）</label>
+        <input id="pRadius" type="number" value="120" min="10" step="5">
+        <label>公轉週期（秒）</label>
+        <input id="pPeriod" type="number" value="20" min="1" step="0.5">
+        <label>行星大小（px）</label>
+        <input id="pSize" type="number" value="6" min="2" step="1">
+        <label>顏色</label>
+        <input id="pColor" type="color" value="#6ee7ff">
+        <div class="btn-row" style="margin-top:10px">
+          <button id="addPlanet">＋ 新增</button>
+          <button id="removeAll">清空</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>行星清單</h2>
+        <div id="planetList" class="planet-list"></div>
+        <p class="muted">提示：行星以 <strong>等速圓周運動</strong>（忽略引力交互）繪製：角度 θ(t) = 2π · t / 週期 + 相位。</p>
+      </section>
+
+      <section class="card">
+        <h2>導出 / 匯入</h2>
+        <div class="btn-row">
+          <button id="exportBtn">匯出設定（JSON）</button>
+          <button id="importBtn">匯入設定</button>
+          <input id="importFile" type="file" accept="application/json" style="display:none">
+        </div>
+      </section>
+    </aside>
+
+    <section class="stage">
+      <canvas id="scene"></canvas>
+      <div class="overlay">
+        <div class="hud" id="hud"></div>
+        <div class="hud legend" id="legend"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // ====== 狀態 ======
+    const state = {
+      running: true,
+      showTrails: true,
+      speed: 1,
+      scale: 1,
+      time: 0,
+      planets: [
+        { name: 'Mercury', radius: 70, period: 8, size: 3, color: '#9ca3af', phase: 0 },
+        { name: 'Venus', radius: 100, period: 13, size: 5, color: '#fbbf24', phase: 0 },
+        { name: 'Earth', radius: 140, period: 20, size: 6, color: '#60a5fa', phase: 0 },
+        { name: 'Mars', radius: 180, period: 38, size: 5, color: '#f87171', phase: 0 }
+      ],
+    };
+
+    // ====== DOM ======
+    const canvas = document.getElementById('scene');
+    const ctx = canvas.getContext('2d');
+    const hud = document.getElementById('hud');
+    const legend = document.getElementById('legend');
+
+    const playPauseBtn = document.getElementById('playPause');
+    const resetBtn = document.getElementById('resetBtn');
+    const toggleTrailsBtn = document.getElementById('toggleTrails');
+
+    const speed = document.getElementById('speed');
+    const speedVal = document.getElementById('speedVal');
+    const scale = document.getElementById('scale');
+    const scaleVal = document.getElementById('scaleVal');
+
+    const pName = document.getElementById('pName');
+    const pRadius = document.getElementById('pRadius');
+    const pPeriod = document.getElementById('pPeriod');
+    const pSize = document.getElementById('pSize');
+    const pColor = document.getElementById('pColor');
+    const addPlanetBtn = document.getElementById('addPlanet');
+    const removeAllBtn = document.getElementById('removeAll');
+    const planetList = document.getElementById('planetList');
+
+    const exportBtn = document.getElementById('exportBtn');
+    const importBtn = document.getElementById('importBtn');
+    const importFile = document.getElementById('importFile');
+
+    // ====== 工具 ======
+    function resizeCanvas(){
+      const rect = canvas.parentElement.getBoundingClientRect();
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(rect.width * dpr);
+      canvas.height = Math.floor((window.innerHeight - 56) * dpr);
+      canvas.style.height = (window.innerHeight - 56) + 'px';
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+
+    function orbitXY(centerX, centerY, radius, angle){
+      return [ centerX + radius * Math.cos(angle), centerY + radius * Math.sin(angle) ];
+    }
+
+    function fmt(n){ return Number(n).toFixed(2); }
+
+    function updateLegend(){
+      legend.innerHTML = '';
+      state.planets.forEach(p => {
+        const el = document.createElement('div');
+        el.className = 'legend-item';
+        el.innerHTML = `<span class="dot" style="background:${p.color}"></span>`+
+          `<span>${p.name} <span class="muted">r=${p.radius}, T=${p.period}s</span></span>`;
+        legend.appendChild(el);
+      });
+    }
+
+    function renderList(){
+      planetList.innerHTML = '';
+      state.planets.forEach((p, i) => {
+        const row = document.createElement('div');
+        row.className = 'planet-item';
+        row.innerHTML = `<span><span class="dot" style="background:${p.color}"></span>${p.name}</span>`+
+          `<span class="muted">r:${p.radius} · T:${p.period}s · ${p.size}px</span>`;
+        const del = document.createElement('button');
+        del.textContent = '刪除';
+        del.onclick = () => { state.planets.splice(i,1); renderList(); updateLegend(); };
+        row.appendChild(del);
+        planetList.appendChild(row);
+      });
+    }
+
+    function download(filename, content){
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([content], {type:'application/json'}));
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    // ====== 事件綁定 ======
+    window.addEventListener('resize', resizeCanvas);
+
+    playPauseBtn.onclick = () => state.running = !state.running;
+    resetBtn.onclick = () => state.time = 0;
+    toggleTrailsBtn.onclick = () => state.showTrails = !state.showTrails;
+
+    speed.oninput = (e)=>{ state.speed = parseFloat(e.target.value); speedVal.textContent = state.speed.toFixed(1); };
+    scale.oninput = (e)=>{ state.scale = parseFloat(e.target.value); scaleVal.textContent = state.scale.toFixed(1); };
+
+    addPlanetBtn.onclick = () => {
+      const name = (pName.value || `Planet ${state.planets.length+1}`).slice(0,20);
+      const radius = Math.max(5, parseFloat(pRadius.value)||60);
+      const period = Math.max(0.1, parseFloat(pPeriod.value)||10);
+      const size = Math.max(2, parseFloat(pSize.value)||5);
+      const color = pColor.value || '#6ee7ff';
+      state.planets.push({ name, radius, period, size, color, phase: 0 });
+      pName.value = '';
+      renderList();
+      updateLegend();
+    };
+
+    removeAllBtn.onclick = () => { state.planets = []; renderList(); updateLegend(); };
+
+    exportBtn.onclick = () => {
+      const payload = JSON.stringify({ ...state, running:true, time:0 }, null, 2);
+      download('orbits.json', payload);
+    };
+
+    importBtn.onclick = () => importFile.click();
+    importFile.onchange = async (e) => {
+      const file = e.target.files?.[0]; if(!file) return;
+      const text = await file.text();
+      try {
+        const obj = JSON.parse(text);
+        if (Array.isArray(obj.planets)) state.planets = obj.planets.map(p=>({
+          name:String(p.name||'Planet'), radius:+p.radius||60, period:+p.period||10, size:+p.size||5, color:p.color||'#6ee7ff', phase:+p.phase||0
+        }));
+        if (obj.scale) state.scale = +obj.scale;
+        if (obj.speed) state.speed = +obj.speed;
+        speed.value = state.speed; speedVal.textContent = state.speed.toFixed(1);
+        scale.value = state.scale; scaleVal.textContent = state.scale.toFixed(1);
+        renderList();
+        updateLegend();
+      } catch(err){ alert('JSON 解析失敗'); }
+    };
+
+    // ====== 模擬與繪製 ======
+    let last = performance.now();
+
+    function step(now){
+      const dt = Math.min(0.05, (now - last)/1000); // s
+      last = now;
+      if (state.running) state.time += dt * state.speed;
+
+      draw();
+      requestAnimationFrame(step);
+    }
+
+    function draw(){
+      const w = canvas.width; const h = canvas.clientHeight * (window.devicePixelRatio||1);
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+
+      // 轉到中心
+      const cx = canvas.width/2; const cy = canvas.height/2;
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      // 尾跡（半透明）
+      if (state.showTrails){
+        ctx.save();
+        ctx.globalAlpha = 0.16;
+        state.planets.forEach(p => {
+          ctx.beginPath();
+          ctx.arc(0,0, p.radius * state.scale, 0, Math.PI*2);
+          ctx.strokeStyle = p.color; ctx.lineWidth = 1.2; ctx.stroke();
+        });
+        ctx.restore();
+      }
+
+      // 星體（中心恆星）
+      const starR = 14;
+      const grad = ctx.createRadialGradient(0,0,2, 0,0,starR*2.2);
+      grad.addColorStop(0,'#fff5'); grad.addColorStop(1,'#ffd96633');
+      ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(0,0, starR*2.2, 0, Math.PI*2); ctx.fill();
+
+      ctx.fillStyle = '#ffd166';
+      ctx.shadowColor = '#ffef96'; ctx.shadowBlur = 20;
+      ctx.beginPath(); ctx.arc(0,0, starR, 0, Math.PI*2); ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // 行星
+      state.planets.forEach(p => {
+        const angle = 2*Math.PI * (state.time / p.period) + (p.phase||0);
+        const [x,y] = orbitXY(0,0, p.radius * state.scale, angle);
+
+        // 行星
+        ctx.beginPath();
+        ctx.fillStyle = p.color;
+        ctx.arc(x,y, p.size, 0, Math.PI*2);
+        ctx.fill();
+
+        // 小型陰影/高光
+        ctx.save();
+        ctx.globalAlpha = .4; ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(x+1,y+1, p.size, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+
+        // 行星名稱（輕量）
+        ctx.save();
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '12px system-ui';
+        ctx.textAlign = 'left';
+        ctx.fillText(p.name, x + p.size + 6, y - p.size - 4);
+        ctx.restore();
+      });
+
+      ctx.restore();
+
+      // HUD
+      hud.innerHTML = `t = <b>${fmt(state.time)}</b> s · planets: <b>${state.planets.length}</b>`;
+    }
+
+    // ====== 初始化 ======
+    resizeCanvas();
+    renderList();
+    updateLegend();
+    requestAnimationFrame(step);
+  </script>
+</body>
+</html>
