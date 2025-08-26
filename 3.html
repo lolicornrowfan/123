@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>三體混沌模擬</title>
+  <style>
+    body { margin:0; background:#000; color:#ddd; font-family: monospace; }
+    canvas { display:block; margin:auto; background:#111; }
+    #ctrl { position:fixed; top:10px; left:10px; background:rgba(30,30,30,0.8); padding:10px; border-radius:6px; }
+    button { margin:3px; }
+  </style>
+</head>
+<body>
+<div id="ctrl">
+  <button id="playBtn">▶/⏸</button>
+  <button id="resetBtn">Reset</button>
+  <button id="rndBtn">Random Init</button>
+  <span id="energy"></span>
+</div>
+<canvas id="sky" width="800" height="600"></canvas>
+
+<script>
+// --- basic setup ---
+const cvs = document.getElementById("sky");
+const ctx = cvs.getContext("2d");
+let W = cvs.width, H = cvs.height;
+
+// 重力常數, 可調
+const G = 0.8;
+// 時間刻度
+let dt = 0.05;
+// 狀態控制
+let running = true;
+
+// 定義三體
+let objs = [];
+
+function initDefault(){
+  objs = [
+    {m: 15, x: -100, y: 0, vx: 0, vy: 1.2, color:"#ff6666", trail:[]},
+    {m: 15, x: 100, y: 0, vx: 0, vy: -1.2, color:"#66ff66", trail:[]},
+    {m: 20, x: 0, y: 120, vx: -1.0, vy: 0, color:"#6699ff", trail:[]}
+  ];
+}
+
+function randomInit(){
+  objs = [];
+  for(let i=0;i<3;i++){
+    objs.push({
+      m: 10+Math.random()*20,
+      x: (Math.random()-0.5)*200,
+      y: (Math.random()-0.5)*200,
+      vx: (Math.random()-0.5)*2,
+      vy: (Math.random()-0.5)*2,
+      color: `hsl(${Math.random()*360},80%,60%)`,
+      trail: []
+    });
+  }
+}
+
+initDefault();
+
+// --- physics ---
+function computeAccel(body, others){
+  let ax=0, ay=0;
+  for(const o of others){
+    const dx = o.x-body.x, dy=o.y-body.y;
+    const r2 = dx*dx+dy*dy+25; // +25避免除零
+    const f = G*o.m/Math.pow(r2,1.5);
+    ax += f*dx;
+    ay += f*dy;
+  }
+  return {ax, ay};
+}
+
+// RK4 數值積分
+function rk4Step(){
+  const newState = [];
+  for(let i=0;i<objs.length;i++){
+    const b = objs[i];
+
+    const k1v = computeAccel(b, objs.filter((_,j)=>j!==i));
+    const k1x = {vx:b.vx, vy:b.vy};
+
+    const tmp2 = {...b,
+      x: b.x + 0.5*dt*k1x.vx,
+      y: b.y + 0.5*dt*k1x.vy,
+      vx: b.vx + 0.5*dt*k1v.ax,
+      vy: b.vy + 0.5*dt*k1v.ay};
+    const k2v = computeAccel(tmp2, objs.filter((_,j)=>j!==i));
+    const k2x = {vx: tmp2.vx, vy: tmp2.vy};
+
+    const tmp3 = {...b,
+      x: b.x + 0.5*dt*k2x.vx,
+      y: b.y + 0.5*dt*k2x.vy,
+      vx: b.vx + 0.5*dt*k2v.ax,
+      vy: b.vy + 0.5*dt*k2v.ay};
+    const k3v = computeAccel(tmp3, objs.filter((_,j)=>j!==i));
+    const k3x = {vx: tmp3.vx, vy: tmp3.vy};
+
+    const tmp4 = {...b,
+      x: b.x + dt*k3x.vx,
+      y: b.y + dt*k3x.vy,
+      vx: b.vx + dt*k3v.ax,
+      vy: b.vy + dt*k3v.ay};
+    const k4v = computeAccel(tmp4, objs.filter((_,j)=>j!==i));
+    const k4x = {vx: tmp4.vx, vy: tmp4.vy};
+
+    const newx = b.x + dt/6*(k1x.vx+2*k2x.vx+2*k3x.vx+k4x.vx);
+    const newy = b.y + dt/6*(k1x.vy+2*k2x.vy+2*k3x.vy+k4x.vy);
+    const newvx = b.vx + dt/6*(k1v.ax+2*k2v.ax+2*k3v.ax+k4v.ax);
+    const newvy = b.vy + dt/6*(k1v.ay+2*k2v.ay+2*k3v.ay+k4v.ay);
+
+    newState.push({...b, x:newx, y:newy, vx:newvx, vy:newvy});
+  }
+  objs = newState;
+}
+
+// energy monitor (not perfect but good)
+function totalEnergy(){
+  let E = 0;
+  // kinetic
+  for(const b of objs){
+    E += 0.5*b.m*(b.vx*b.vx+b.vy*b.vy);
+  }
+  // potential
+  for(let i=0;i<objs.length;i++){
+    for(let j=i+1;j<objs.length;j++){
+      const dx = objs[j].x-objs[i].x;
+      const dy = objs[j].y-objs[i].y;
+      const r = Math.sqrt(dx*dx+dy*dy+1);
+      E -= G*objs[i].m*objs[j].m/r;
+    }
+  }
+  return E;
+}
+
+// --- drawing ---
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  ctx.translate(W/2,H/2);
+
+  for(const b of objs){
+    // trail
+    b.trail.push([b.x,b.y]);
+    if(b.trail.length>300) b.trail.shift();
+    ctx.beginPath();
+    ctx.strokeStyle=b.color;
+    ctx.moveTo(b.trail[0][0],b.trail[0][1]);
+    for(const [tx,ty] of b.trail){ ctx.lineTo(tx,ty); }
+    ctx.stroke();
+
+    // body
+    ctx.beginPath();
+    ctx.fillStyle = b.color;
+    ctx.arc(b.x,b.y, Math.sqrt(b.m),0,Math.PI*2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+  document.getElementById("energy").innerText = "Energy="+totalEnergy().toFixed(2);
+}
+
+// --- loop ---
+function step(){
+  if(running){
+    rk4Step();
+  }
+  draw();
+  requestAnimationFrame(step);
+}
+step();
+
+// --- controls ---
+document.getElementById("playBtn").onclick=()=>{running=!running;};
+document.getElementById("resetBtn").onclick=()=>{initDefault();};
+document.getElementById("rndBtn").onclick=()=>{randomInit();};
+
+</script>
+</body>
+</html>
